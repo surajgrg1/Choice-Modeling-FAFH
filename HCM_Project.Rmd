@@ -1,0 +1,383 @@
+---
+title: "HCM_Project"
+author: "Md Roknuzzaman and Suraj Gurung"
+date: "2023-11-19"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part 1- Working in the CE_Design.csv File
+
+```{r}
+getwd()
+setwd("/Users/surajgurung/Library/CloudStorage/Dropbox-UFL/Shared with Suraj Gurung/HCM_Research project")
+library("openxlsx")
+
+rm( list=ls() )
+CE.Design<- read.csv("CE_Design.csv", header = TRUE)
+Survey<- read.csv("HCM_Survey.csv")
+CE.Design
+
+#Change each attribute from wide to long format (Short Version)
+#change times=.. based on the number of alternatives in a choice set
+Price<-reshape(CE.Design[,c("Set", "P1", "P2", "P3")], idvar = "Set", varying
+               = c("P1", "P2", "P3"),
+               timevar = "Alt",
+               times=c(1, 2, 3),
+               sep = "",
+               direction = "long")
+attach(Price)
+Price <- Price[order(Set,Alt),]
+detach(Price)
+Price
+
+Calorie<-reshape(CE.Design[,c("Set","C1", "C2", "C3")], idvar = "Set", varying
+                = c("C1", "C2", "C3"),
+                timevar = "Alt",
+                times=c(1, 2, 3),
+                sep = "",
+                direction = "long")
+attach(Calorie)
+Calorie <- Calorie[order(Set,Alt ),]
+detach(Calorie)
+Calorie
+
+Source<-reshape(CE.Design[,c("Set","S1", "S2", "S3")], idvar = "Set", varying
+                = c("S1", "S2", "S3"),
+                timevar = "Alt",
+                times=c(1, 2, 3),
+                sep = "",
+                direction = "long")
+
+attach(Source)
+Source <- Source[order(Set,Alt ),]
+detach(Source)
+Source
+
+Outlet<-reshape(CE.Design[,c("Set","O1", "O2", "O3")], idvar = "Set", varying
+                = c("O1", "O2", "O3"),
+                timevar = "Alt",
+                times=c(1, 2, 3),
+                sep = "",
+                direction = "long")
+
+attach(Outlet)
+Outlet <- Outlet[order(Set,Alt ),]
+detach(Outlet)
+Outlet
+
+#Combine all attributes
+#using -c(1,2) to drop the Set and Alt variables in price, Source, Outlet and calorie. Dates data set
+#because they are the same for all the data sets of attributes
+CE1<-cbind(Price, Calorie[,-c(1, 2)], Source[,-c(1,2)], Outlet[,-c(1,2)])
+
+#rename the variables in the data
+names(CE1)<-c("Set", "Alt", "Price", "Calorie", "Source", "Outlet")
+CE1
+
+```
+
+## Working with the survey data
+
+```{r}
+#Repeat the data by the number of respondents; each respondent needs alt*set rows
+nset<-11 #number of choice sets
+nalt<-3 #number of alternatives
+nres<-nrow(Survey) #number of respondents
+#install the mefa package
+#install.packages('mefa')
+library(mefa)
+#repeat the CE nres times, each respondent having a CE
+CE2<-rep(CE1, time=nres)
+#Working on the survey data
+#Creat a respondent ID variable
+RID<-rep(1:nres, each=1)
+#Combine the RID and the survey data
+Survey1<-cbind(RID, Survey)
+
+#Duplicated the survey data by the number of set
+
+#Transform the data from wide to long formate by RID, and SET1:SET14
+Survey2<-reshape(Survey1, idvar = "RID",
+                 varying = c("Set1", "Set2", "Set3", "Set4", "Set5", "Set6", "Set7",
+                             "Set8", "Set9", "Set10", "Set11"),
+                 timevar = "SET",
+                 times=c(1:11),
+                 sep = "",
+                 direction = "long")
+
+
+# reorder the data by RID
+Survey2 <- Survey2[order(Survey2$RID),]
+
+#Change set to choose because this variable indicate the choice in a choice set
+names(Survey2)[names(Survey2)=="Set"] <- "Choose"
+
+#Duplicated the survey data by the number of alt
+#Create variables to indicate the alternatives
+Alt1<-rep(1, each=nres*nset)
+Alt2<-rep(2, each=nres*nset)
+#the same for alternative 3
+Alt3<-rep(3, each=nres*nset)
+# Add Alt1-Alt3 to the data survey2, make sure to add an obs variable, which will be used later for
+
+#data transformation
+Survey3<-cbind(obs<-rep(1:I(nres*nset), each=1),Survey2, Alt1, Alt2, Alt3)
+
+#Transform the data from wide to long format again by RID, and Alt1:Alt3
+Survey4<-reshape(Survey3, idvar = "obs",
+                 varying = c("Alt1", "Alt2", "Alt3"),
+                 timevar = "Alt",
+                 times=c(1:3),
+                 sep = "",
+                 direction = "long")
+
+# Reorder the data by RID, SETS, and Alt
+Survey4 <- Survey4[order(Survey4$RID, Survey4$SET, Survey4$Alt),]
+
+#Merge CE data and survey data
+# Merge CE data and survey data
+CE.Sur <- cbind(Survey4,CE2[,-c(1,2)])
+
+# Create a choice variable as the dependent variable y
+CE.Sur$Choices<-(Survey4$Choose==Survey4$Alt)
+
+```
+
+## Create Dummy Variable
+
+```{r}
+#Create dummy variables for categorical variables
+
+# Create dummy variables for Protein Source
+fac<-factor(CE.Sur$Source)
+Source.d<-as.data.frame(model.matrix(~fac+0))
+names(Source.d)<-c("none", "S1", "S2", "S3")
+
+# Create dummy variables for Food Outlet
+fac<-factor(CE.Sur$Outlet)
+Outlet.d<-as.data.frame(model.matrix(~fac+0))
+names(Outlet.d)<-c("none","O1", "O2", "O3")
+
+# Do the same for other attributes #do the same for other attributes
+#fac<-factor(CE.Sur$Calorie)
+#Calorie.d<-as.data.frame(model.matrix(~fac+0))
+#names(Calorie.d)<-c("none", "C1", "C2", "C3", "C4")
+
+# Add dummy variables back to the data
+CE.Sur2<-cbind(CE.Sur, Source.d, Outlet.d)
+
+```
+
+
+```{r}
+#Using canned commands to verify the transformed data
+library(gmnl)
+library(mlogit)
+
+maindata<-mlogit.data(data=CE.Sur2, choice="Choices", shape = "long", varying = NULL,
+                   alt.levels =c("A", "B", "NONE"), id.var = "SET")
+
+# Separating the data based on treatment
+datatrt1 <- maindata[maindata$Trt1==1,]
+
+datatrt2 <- maindata[maindata$Trt2==1,]
+
+datatrt3 <- maindata[maindata$Trt3==1,]
+
+#Save the main file 
+write.csv(maindata, file = "maindata.csv", row.names = FALSE)
+```
+
+## Running the analysis- Conditional Logit
+
+```{r}
+# C4 is base - 1920Cal
+# S1 is base - Regular Beef
+# 02 is the base - Chain Restaurant
+
+#Estimating a conditional logit model for Treatment1
+Cond.Model1 <- mlogit(Choices ~ 0 + Price + Calorie + S2 + S3 + O1 + O3, data = datatrt1) #0 indicate no intercept
+
+summary(Cond.Model1)
+
+#Estimating a conditional logit model for Treatment2
+Cond.Model2 <- mlogit(Choices ~ 0 + Price + Calorie + S2 + S3 + O1 + O3, data = datatrt2) #0 indicate no intercept
+
+summary(Cond.Model2)
+
+#Estimating a conditional logit model for Treatment2
+Cond.Model3 <- mlogit(Choices ~ 0 + Price + Calorie + S2 + S3 + O1 + O3, data = datatrt3) #0 indicate no intercept
+
+summary(Cond.Model3)
+
+library(stargazer)
+
+#Poooled data set
+Cond.ModelPooled <- mlogit(Choices ~ 0 + Price + Calorie + S2 + S3 + O1 + O3, data = maindata)
+
+stargazer(Cond.Model1, Cond.Model2, Cond.Model3, Cond.ModelPooled, type = "text", title = "Conditional Logit")
+stargazer(Cond.Model1, Cond.Model2, Cond.Model3, Cond.ModelPooled, type = "html", out = "Cond.Model_1.html")
+
+```
+
+
+## Calculation of the WTP- conditional logit Model
+
+```{r}
+library(psych)
+
+#estimate WTP
+#notice that all mean WTP values are negative of expected, because R simply divide the 
+#coefficient of non-price attribute by the price attribute, we need to add a negative before the mean
+#variance of WTP is estimated by delta method
+bi.clm1<- -wtp.gmnl(Cond.Model1, wrt = "Price")
+
+#variance of WTP is estimated by delta method
+bi.clm2<- -wtp.gmnl(Cond.Model2, wrt = "Price")
+
+#variance of WTP is estimated by delta method
+bi.clm3<- -wtp.gmnl(Cond.Model3, wrt = "Price")
+
+stargazer(bi.clm1, bi.clm2, bi.clm3, type = "html", out = "WTP.html")
+
+```
+
+
+## Running the analsysis - Mixed Logit Model
+
+```{r}
+#Mixed Logit
+
+#Estimating a Mixed logit model for Treatment1
+Mix.Model1<-gmnl(Choices~ Price + Calorie + S2 + S3 + O1 + O3|0, data= datatrt1, #0 indicate no intercept
+model = "mixl",
+ranp = c(S2 = "n", S3= "n", O1= "n", O3= "n"),
+panel = TRUE,
+correlation = F,
+R = 25,
+method = "bfgs") #0 indicate no intercept
+
+summary(Mix.Model1)
+
+AIC(Mix.Model1)
+BIC(Mix.Model1)
+
+#individual parameter estimates for Mix model1
+bi.Mix.1 <- as.data.frame(effect.gmnl(Mix.Model1, par = c("S2","S3","O1","O3"),
+effect = c("ce")))
+
+#Estimating a Mixed logit model for Treatment2
+
+Mix.Model2<-gmnl(Choices~ Price + Calorie + S2 + S3 + O1 + O3|0, data= datatrt2, #0 indicate no intercept
+model = "mixl",
+ranp = c(S2 = "n", S3= "n", O1= "n", O3= "n"),
+panel = TRUE,
+correlation = F,
+R = 25,
+method = "bfgs") #0 indicate no intercept
+
+summary(Mix.Model2)
+
+AIC(Mix.Model2)
+BIC(Mix.Model2)
+
+#individual parameter estimates for Mix model2
+bi.Mix.2 <- as.data.frame(effect.gmnl(Mix.Model2, par = c("S2","S3","O1","O3"),
+effect = c("ce")))
+
+#Estimating a Mixed logit model for Treatment3
+
+Mix.Model3<-gmnl(Choices~ Price + Calorie + S2 + S3 + O1 + O3|0, data= datatrt3, #0 indicate no intercept
+model = "mixl",
+ranp = c(S2 = "n", S3= "n", O1= "n", O3= "n"),
+panel = TRUE,
+correlation = F,
+R = 25,
+method = "bfgs") #0 indicate no intercept
+
+summary(Mix.Model3)
+
+AIC(Mix.Model3)
+BIC(Mix.Model3)
+
+#individual parameter estimates for Mix model3
+bi.Mix.3 <- as.data.frame(effect.gmnl(Mix.Model3, par = c("S2","S3","O1","O3"),
+effect = c("ce")))
+
+# The estimates from sds are the elements of the lower triangular matrix L LL'=covariance matrix
+#variance of random parameters
+cov.gmnl(Mix.Model3)
+# Standard errors for Sigma/variance of random parameters
+#se.cov.gmnl(Mix.Model3)
+# Standard errors for standard deviations
+#se.cov.gmnl(Mix.Model3, sd = TRUE)
+#The correlation matrix of the random parameters
+#cor.gmnl(Mix.Model3)
+
+
+
+```
+
+## Calculate the WTP for Mix logit Model
+
+
+```{r}
+#estimate WTP using delta method
+wtp.gmnl(Mix.Model1, wrt = "Price")
+
+#estimate WTP using delta method
+wtp.gmnl(Mix.Model2, wrt = "Price")
+
+#estimate WTP using delta method
+wtp.gmnl(Mix.Model3, wrt = "Price")
+
+
+#individual WTP estimates
+bi.Mix.1 <- as.data.frame(effect.gmnl(Mix.Model1, par = c("S2","S3","O1","O3"),
+                                       effect = c("wtp"), wrt = "Price"))
+describe(bi.Mix.1)
+
+bi.Mix.2 <- as.data.frame(effect.gmnl(Mix.Model2, par = c("S2","S3","O1","O3"),
+                                       effect = c("wtp"), wrt = "Price"))
+describe(bi.Mix.2)
+
+bi.Mix.3 <- as.data.frame(effect.gmnl(Mix.Model3, par = c("S2","S3","O1","O3"),
+                                       effect = c("wtp"), wrt = "Price"))
+describe(bi.Mix.3)
+
+```
+
+
+## Impact of demographics on preference- Conditional Logit
+
+```{r}
+
+#Estimating a conditional logit model for Treatment1
+Cond.Model4 <- mlogit(Choices ~ 0 + Price + Calorie + S1 + S2 + O1 + O2 |0|0|0| Gender + Income + Political_affi, data = datatrt1) #0 indicate no intercept
+
+summary(Cond.Model1)
+
+#Estimating a conditional logit model for Treatment2
+Cond.Model5 <- mlogit(Choices ~ 0 + Price + Calorie + S1 + S2 + O1 + O2 |0|0|0| Gender + Income + Political_affi -1, data = datatrt2) #0 indicate no intercept
+
+summary(Cond.Model2)
+
+#Estimating a conditional logit model for Treatment2
+Cond.Model6 <- mlogit(Choices ~ 0 + Price + Calorie + S1 + S2 + O1 + O2 |0|0|0| Gender + Income + Political_affi -1, data = datatrt3) #0 indicate no intercept
+
+summary(Cond.Model3)
+```
+
+
+
+
+
+
+
+
