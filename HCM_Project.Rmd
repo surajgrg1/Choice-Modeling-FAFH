@@ -1,6 +1,6 @@
 ---
 title: "HCM_Project"
-author: "Md Roknuzzaman and Suraj Gurung"
+author: "Suraj Gurung"
 date: "2023-11-19"
 output:
   word_document: default
