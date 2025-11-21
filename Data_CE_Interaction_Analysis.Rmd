@@ -1,0 +1,1823 @@
+---
+title: "Data_CE_Analysis_interaction"
+author: "Suraj Gurung"
+date: "2025-08-25"
+output: html_document
+---
+
+---
+title: "Data_CE_R2"
+author: "Suraj Gurung"
+date: "2025-04-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# 1. Loading the dataset
+```{r}
+rm( list=ls() )
+
+#Set the working directory
+setwd("/Users/surajgurung/Library/CloudStorage/Dropbox-UFL/Suraj Gurung/Shared_home_kitchen/Phase7-Data Collection/")
+
+#Upload the clean survey data (Final DATA from Data Analysis)
+library(readxl)
+Survey <- read.csv("Survey1.csv", header = TRUE)
+
+CE1 <- read.csv("CE_design.csv", header = TRUE)
+
+```
+
+
+# 2. Data transformation from long to wide format
+
+```{r}
+nset<-20 #number of choice sets 
+nalt<-3 #number of alternatives 
+nres<-nrow(Survey) #number of respondents 
+#install the mefa package 
+#install.packages('mefa')
+library(mefa) 
+
+#repeat the CE nres times, each respondent having a 
+CE2<-rep(CE1, time=nres)
+
+```
+
+## 2.1. Data transforation
+
+```{r}
+#Creat a respondent ID variable
+RID<-rep(1:nres, each=1) 
+#Combine the RID and the survey data 
+Survey1<-cbind(RID, Survey)
+
+#Transform the data from wide to long formate by RID, and SET1:SET14
+Survey2<-reshape(Survey1, idvar = "RID",
+                 varying = c("SET1", "SET2", "SET3", "SET4", "SET5", "SET6", "SET7", "SET8", "SET9", "SET10", "SET11", "SET12", "SET13", "SET14", "SET15", "SET16", "SET17", "SET18", "SET19", "SET20"),
+                 timevar = "Set",
+                 times=c(1:20),
+                 sep = "",
+                 direction = "long")
+
+# reorder the data by RID 
+Survey2 <- Survey2[order(Survey2$RID),] 
+
+#Change set to choose because this variable indicate the choice in a choice set 
+names(Survey2)[names(Survey2)=="SET"] <- "Choose" 
+
+#Duplicated the survey data by the number of alt
+
+#Create variables to indicate the alternatives 
+Alt1<-rep(1, each=nres*nset)
+Alt2<-rep(2, each=nres*nset) 
+#the same for alternative 3 
+Alt3<-rep(3, each=nres*nset) 
+
+# Add Alt1-Alt3 to the data survey2, make sure to add an obs variable, which will be used later for #data transformation 
+Survey3<-cbind(obs<-rep(1:I(nres*nset), each=1),Survey2, Alt1, Alt2, Alt3) 
+
+#Transform the data from wide to long format again by RID, and Alt1:Alt3 
+Survey4<-reshape(Survey3, idvar = "obs", varying = c("Alt1", "Alt2", "Alt3"),
+                 timevar = "Alt",
+                 times=c(1:3),
+                 sep = "", 
+                 direction = "long")
+
+# Reorder the data by RID, SETS, and Alt 
+Survey4 <- Survey4[order(Survey4$RID, Survey4$Set, Survey4$Alt),]
+
+# Merge CE data and survey data
+CE.Sur <- cbind(Survey4, CE2[,-c(1,2)])  #REMOVE Set and ALt
+
+# Create a choice variable as the dependent variable y
+CE.Sur$Choices <- (Survey4$Choose == Survey4$Alt)
+
+```
+
+Note: 
+E1: Restaurant (1)
+E2: HK (Inspected) (2)
+E3: HK (exempt) (3)
+
+Review
+R1: 3-star (1)
+R2: 4-star (2)
+R3: 5-star (3)
+
+Insurance
+I1: No (1)
+I2: Yes (2)
+
+Food Manager Certificate
+M1: No (1)
+M2: Yes (2)
+
+Food Handler Certificate
+H1: No (1)
+H2: Yes (2)
+
+## 2.2. Create dummy variables for categorical variables
+
+```{r}
+# Create dummy variables for Food Establishment
+fac <- factor(CE.Sur$Establishment)
+Establishment.d <- as.data.frame(model.matrix(~fac + 0))
+names(Establishment.d) <- c("none_Establishment", "E1", "E2", "E3")
+
+# Create dummy variables for Insurance
+fac <- factor(CE.Sur$Insurance)
+Insurance.d <- as.data.frame(model.matrix(~fac + 0))
+names(Insurance.d) <- c("none_Insurance", "I1", "I2")
+
+# Create dummy variables for Review
+fac <- factor(CE.Sur$Review)
+Review.d <- as.data.frame(model.matrix(~fac + 0))
+names(Review.d) <- c("none_Review", "R1", "R2", "R3")
+
+# Create dummy variables for Manager Certificate
+fac <- factor(CE.Sur$FMC)
+FMC.d <- as.data.frame(model.matrix(~fac + 0))
+names(FMC.d) <- c("none_FMC", "M1", "M2")
+
+# Create dummy variables for Manager Certificate
+fac <- factor(CE.Sur$FHC)
+FHC.d <- as.data.frame(model.matrix(~fac + 0))
+names(FHC.d) <- c("none_FHC", "H1", "H2")
+
+# Add dummy variables back to the data
+CE.Sur2 <- cbind(CE.Sur, Establishment.d, Insurance.d, FMC.d, FHC.d, Review.d)
+
+# Check consistency of 'none' columns
+none_columns <- grep("^none_", names(CE.Sur2), value = TRUE)
+
+none_check <- apply(CE.Sur2[, none_columns], 1, function(x) length(unique(x)) == 1)
+if (all(none_check)) {
+  print("All 'none' columns have the same values in all rows.")
+  
+  # Create a new 'none' column based on the first 'none' column
+  CE.Sur2$none <- CE.Sur2[, none_columns[1]]
+  
+  # Drop the remaining 'none' columns
+  CE.Sur2 <- CE.Sur2[, !(names(CE.Sur2) %in% none_columns)]
+} else {
+  print("Some 'none' columns have different values.")
+}
+
+# Verify the data frame
+head(CE.Sur2)
+```
+
+
+## 2.3. Create long format dataset
+
+```{r}
+#Using canned commands to verify the transformed data
+library(mefa)
+library(gmnl)
+library(mlogit)
+# Load the gmnl package
+library(gmnl)
+library(psych)
+
+
+# Converting the dataframe to mlogit.data format
+mdata<-mlogit.data(data=CE.Sur2,
+                   choice="Choices",
+                   shape = "long",
+                   varying = NULL,
+                   alt.levels =c("A", "B", "NONE"),
+                   id.var = "RID") #previously used Set
+
+head(mdata)
+
+#names(mdata)
+# Create Altrusitic data set
+mdata_treatment_1 <- subset(mdata, Treatment == 1)  
+
+# Create Egoistic data set
+mdata_treatment_2 <- subset(mdata, Treatment == 2) 
+
+# Create Control data set
+mdata_treatment_3 <- subset(mdata, Treatment == 3) 
+
+
+```
+```{r}
+mix_pooled <-gmnl(Choices ~ 0 + none + Price + R2 +R3 + E2 + E3 + I2 + M2 + H2
+              + E2*I2 + E2*M2 + E2*H2 + E3*I2 + E3*M2 + E3*H2, data = mdata,
+              model = "mixl",
+              R = 1000,
+              panel = T,
+              id= "RID",
+              ranp = c(none = "n", R2 = "n", R3 = "n", E2 = "n", E3= "n", I2= "n", M2= "n", H2 = "n"),
+              correlation = F,
+            method = "bhhh") #0 indicate no intercept
+
+summary(mix_pooled)
+
+AIC(mix_pooled) 
+
+```
+
+
+
+
+# 3. Mixed (RPL) Model- Treatment 1: Altruistic
+
+```{r} 
+mix_t1 <-gmnl(Choices ~ 0 + none + Price + R2 +R3 + E2 + E3 + I2 + M2 + H2
+              + E2*I2 + E2*M2 + E2*H2 
+              + E3*I2 + E3*M2 + E3*H2, data = mdata_treatment_1, 
+              model = "mixl",
+              R = 1000,
+              panel = T,
+              id= "RID",
+              ranp = c(none = "n", R2 = "n", R3 = "n", E2 = "n", E3= "n", I2= "n", M2= "n", H2 = "n"),
+              correlation = F,
+            method = "bhhh") #0 indicate no intercept
+
+
+## 10.1. Estimating MIXL Model
+mix_t1
+summary(mix_t1)
+
+AIC(mix_t1) 
+BIC(mix_t1) 
+
+## 10.2. WTP using Delta method (With Interaction)
+#Note: R simply divide the coefficient of non-price attribute by the price attribute, we need to add a negative before the mean
+wtp.gmnl(mix_t1, wrt = "Price")
+
+#Individual parameters estimate 
+bi.Mix.t1 <- as.data.frame(effect.gmnl(mix_t1, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"), effect = c("ce")))
+describe(bi.Mix.t1)
+
+
+## 10.3. individual WTP estimates
+WTP.Mix.t1 <- -as.data.frame(effect.gmnl(mix_t1, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"),
+                                       effect = c("wtp"), wrt = "Price"))
+
+summary(WTP.Mix.t1)
+
+```
+
+
+# 4. Mixed (RPL) Model- Treatment 2: Egoistic
+
+```{r}
+########################################################################
+#Treatment 2: Egositic
+
+mix_t2 <-gmnl(Choices ~ 0 + none + Price + R2 + R3 + E2 + E3 + I2 + M2 + H2
+               + E2*I2 + E2*M2 + E2*H2 
+              + E3*I2 + E3*M2 + E3*H2, data = mdata_treatment_2, 
+              model = "mixl",
+              R = 1000,
+              panel = T,
+              ranp = c(none = "n", R2 = "n", R3 = "n", E2 = "n", E3= "n", I2= "n", M2= "n", H2 = "n"),
+              correlation = F,
+            method = "bhhh") #0 indicate no intercept
+
+
+## 10.2. Estimating MIXL Model
+summary(mix_t2)
+
+AIC(mix_t2) 
+BIC(mix_t2) 
+
+## 10.2. WTP using Delta method (Without Interaction)
+#Note: R simply divide the coefficient of non-price attribute by the price attribute, we need to add a negative before the mean
+wtp.gmnl(mix_t2, wrt = "Price")
+
+
+#Individual parameters estimate 
+bi.Mix.t2 <- as.data.frame(effect.gmnl(mix_t2, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"),
+                                       effect = c("ce")))
+describe(bi.Mix.t2)
+
+
+## 10.3. individual WTP estimates
+WTP.Mix.t2 <- -as.data.frame(effect.gmnl(mix_t2, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"),
+                                       effect = c("wtp"), wrt = "Price"))
+
+summary(WTP.Mix.t2)
+########################################################################
+
+```
+
+# 5. Mixed (RPL) Model- Treatment 3: Control
+
+```{r}
+#Treatment 3: Control
+mix_t3 <-gmnl(Choices ~ 0 + none + Price + R2 + R3 + E2 + E3 + I2 + M2 + H2
+               + E2*I2 + E2*M2 + E2*H2 
+              + E3*I2 + E3*M2 + E3*H2, data = mdata_treatment_3, 
+              model = "mixl",
+              R = 1000,
+              panel = T,
+              ranp = c(none = "n", R2 = "n", R3 = "n", E2 = "n", E3= "n", I2= "n", M2= "n", H2 = "n"),
+              correlation = F,
+            method = "bhhh") #0 indicate no intercept
+
+
+## 10.2. Estimating MIXL Model
+summary(mix_t3)
+
+AIC(mix_t3) 
+BIC(mix_t3) 
+
+## 10.2. WTP using Delta method (Without Interaction)
+#Note: R simply divide the coefficient of non-price attribute by the price attribute, we need to add a negative before the mean
+wtp.gmnl(mix_t3, wrt = "Price")
+
+
+#Individual parameters estimate 
+bi.Mix.t3 <- as.data.frame(effect.gmnl(mix_t3, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"),effect = c("ce")))
+
+describe(bi.Mix.t3)
+
+
+## 10.3. individual WTP estimates
+WTP.Mix.t3 <- -as.data.frame(effect.gmnl(mix_t3, par = c("none", "R2", "R3", "E2","E3","I2","M2","H2"),
+                                       effect = c("wtp"), wrt = "Price"))
+
+summary(WTP.Mix.t3)
+
+```
+
+
+## Calculating the proportion of respondents that prefer home kitchens
+
+```{r}
+
+# === CONTROL group ===
+mean_E2_ctl <- coef(mix_t3)["E2"]
+sd_E2_ctl   <- coef(mix_t3)["sd.E2"]
+mean_E3_ctl <- coef(mix_t3)["E3"]
+sd_E3_ctl   <- coef(mix_t3)["sd.E3"]
+
+# === ALTRUISTIC group ===
+mean_E2_alt <- coef(mix_t1)["E2"]
+sd_E2_alt   <- coef(mix_t1)["sd.E2"]
+mean_E3_alt <- coef(mix_t1)["E3"]
+sd_E3_alt   <- coef(mix_t1)["sd.E3"]
+
+# === EGOISTIC group ===
+mean_E2_ego <- coef(mix_t2)["E2"]
+sd_E2_ego   <- coef(mix_t2)["sd.E2"]
+mean_E3_ego <- coef(mix_t2)["E3"]
+sd_E3_ego   <- coef(mix_t2)["sd.E3"]
+
+# === Pooled group ===
+mean_E2_pooled <- coef(mix_pooled)["E2"]
+sd_E2_pooled   <- coef(mix_pooled)["sd.E2"]
+mean_E3_pooled <- coef(mix_pooled)["E3"]
+sd_E3_pooled   <- coef(mix_pooled)["sd.E3"]
+
+# === Function to compute proportion who favor (β > 0)
+prop_favor <- function(mean, sd)  (1 - pnorm(0, mean, sd))  * 100
+
+# === Compute proportions ===
+results <- data.frame(
+  Group = c("Control", "Altruistic", "Egoistic", "Pooled"),
+  Favor_Inspected = c(prop_favor(mean_E2_ctl, sd_E2_ctl),
+                      prop_favor(mean_E2_alt, sd_E2_alt),
+                      prop_favor(mean_E2_ego, sd_E2_ego),
+                      prop_favor(mean_E2_pooled, sd_E2_pooled)),
+  Favor_Exempt = c(prop_favor(mean_E3_ctl, sd_E3_ctl),
+                   prop_favor(mean_E3_alt, sd_E3_alt),
+                   prop_favor(mean_E3_ego, sd_E3_ego),
+                   prop_favor(mean_E3_pooled, sd_E3_pooled)
+                  )
+)
+
+results
+
+```
+
+
+
+## 5.1 Test for  likelihood ratio (LR) test for pooled vs. separate models.
+
+```{r}
+# 1) Extract LLs as numeric
+LL_ctl  <- as.numeric(logLik(mix_t3)) # Control
+LL_alt  <- as.numeric(logLik(mix_t1)) # Altruistic
+LL_ego  <- as.numeric(logLik(mix_t2)) #Egoistic
+LL_pool <- as.numeric(logLik(mix_pooled)) # Pooled
+
+LL_sep  <- LL_ctl + LL_alt + LL_ego
+
+cat("LL Control:", LL_ctl, "\n")
+cat("LL Altruistic:", LL_alt, "\n")
+cat("LL Egoistic:", LL_ego, "\n")
+cat("LL Pooled:", LL_pool, "\n")
+cat("LL Separate (sum):", LL_sep, "\n")
+
+# 2) LR statistic (separate vs pooled)
+LR_stat <- 2 * (LL_sep - LL_pool)
+
+# 3) Exact degrees of freedom
+k_ctl  <- length(coef(mix_t3)) #control
+k_alt  <- length(coef(mix_t1)) #Altruistic
+k_ego  <- length(coef(mix_t2)) #Egoistic
+k_pool <- length(coef(mix_pooled))
+df     <- (k_ctl + k_alt + k_ego) - k_pool
+
+# 4) p-value and decision
+p_value <- pchisq(LR_stat, df = df, lower.tail = FALSE)
+
+cat("\n=== Likelihood Ratio Test ===\n")
+cat("LR statistic:", LR_stat, "\n")
+cat("Degrees of freedom:", df, "\n")
+cat("P-value:", p_value, "\n")
+cat("Critical value (0.01):", qchisq(0.99, df), "\n")
+
+if (p_value < 0.01) {
+  cat("Result: REJECT H0 (parameters differ across treatments)\n")
+} else {
+  cat("Result: FAIL TO REJECT H0 (pooling is acceptable)\n")
+}
+
+```
+
+
+## 5.2 Louviere–Hensher–Swait (LHS)
+
+```{r}
+# Replace X1 + X2 + ... with your exact attribute names (Price, R2, R3, E2, E3, I2, M2, H2, interactions, etc.)
+form_mnl <- Choices ~ 0 + none + Price + R2 + R3 + E2 + E3 + I2 + M2 + H2 +
+                     E2*I2 + E2*M2 + E2*H2 + E3*I2 + E3*M2 + E3*H2
+
+
+# Estimate separate MNLs by treatment and record log-likelihoods
+mnl_ctl <- gmnl(form_mnl, data = mdata_treatment_3,   model="mnl")
+mnl_alt <- gmnl(form_mnl, data = mdata_treatment_1, model="mnl")
+mnl_ego <- gmnl(form_mnl, data = mdata_treatment_2,   model="mnl")
+
+LL_sep <- as.numeric(logLik(mnl_ctl) + logLik(mnl_alt) + logLik(mnl_ego))
+k      <- length(coef(mnl_ctl))  # # of parameters per separate model (should be same across)
+M      <- 3                      # number of groups
+
+# Estimate the scale-adjusted joint model (the “artificial tree”)
+
+# # Joint model: common parameters, group-specific scales (Control is the normalized base)
+# mnl_joint_scale <- gmnl(
+#   form_mnl,
+#   data  = mdata,
+#   model = "smnl",
+#   scale = ~ 0 + Treatment,   # creates 2 scale parameters: treatAltruistic, treatEgoistic
+#   # panel = TRUE/FALSE as appropriate for your data; LHS test is usually at MNL level
+# )
+
+# Just to be explicit about which group is the scale reference
+mdata$Treatment <- factor(mdata$Treatment, levels = c("Control", "Altruistic", "Egoistic"))
+
+mnl_joint_scale <- gmnl(form_mnl,
+                        data = mdata,
+                        model = "smnl",
+                        scale = ~ Treatment,      # Control scale normalized to 1
+                        method = "bfgs")          # sometimes converges better
+
+LL_joint <- as.numeric(logLik(mnl_joint_scale))
+
+#Compute the LHS test statistic and p-value
+
+LR  <- -2 * (LL_joint - LL_sep)
+df  <- k * (M - 1)
+p   <- pchisq(LR, df = df, lower.tail = FALSE)
+
+cat("LL (separate sum):", LL_sep, "\n")
+cat("LL (joint w/ scales):", LL_joint, "\n")
+cat("LR stat:", LR, " | df:", df, " | p-value:", p, "\n")
+
+if (p < 0.05) {
+  cat("=> Reject equality: parameters differ across treatments (beyond scale).\n")
+} else {
+  cat("=> Fail to reject equality: differences can be explained by scale; pooling acceptable.\n")
+}
+
+```
+
+
+# 6. Table for the Mix-logit Model Results across treatment
+
+```{r}
+summary(mix_t1) # ALtruistic
+summary(mix_t2) #Egoistic
+summary(mix_t3) #Control
+summary(mix_pooled)
+
+
+library(dplyr)
+library(stargazer)
+
+extract_gmnl_clean <- function(model) {
+  # Extract coefficient estimates and standard errors directly
+  est <- coef(model)
+  se <- sqrt(diag(vcov(model)))
+  
+  # Try to get p-values if possible
+  zval <- est / se
+  pval <- 2 * (1 - pnorm(abs(zval)))
+  
+  data.frame(
+    Term = names(est),
+    Estimate = est,
+    SE = se,
+    pValue = pval,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Extract results for each treatment
+res_t1 <- extract_gmnl_clean(mix_t1) 
+res_t2 <- extract_gmnl_clean(mix_t2)
+res_t3 <- extract_gmnl_clean(mix_t3)
+res_pooled <- extract_gmnl_clean(mix_pooled)
+
+# Merge and format
+summary_table <- res_t1 %>%
+  rename(Altruistic_Est = Estimate, Altruistic_SE = SE) %>%
+  full_join(res_t2 %>% rename(Egoistic_Est = Estimate, Egoistic_SE = SE), by = "Term") %>%
+  full_join(res_t3 %>% rename(Control_Est = Estimate, Control_SE = SE), by = "Term") %>%
+  full_join(res_pooled %>% rename(Pooled_Est = Estimate, Pooled_SE = SE), by = "Term") %>%
+  dplyr::select(Term, contains("Altruistic"), contains("Egoistic"), contains("Control"), contains("Pooled"))
+
+# Format with significance stars
+
+# Add significance stars function (new thresholds)
+add_stars <- function(est, p, se) {
+  stars <- ifelse(p < 0.01, "***",
+           ifelse(p < 0.05, "**",
+           ifelse(p < 0.10, "*", "")))
+  sprintf("%.3f%s (SE=%.3f)", est, stars, se)
+}
+
+# Now pass the SEs as well
+summary_table <- summary_table %>%
+  mutate(
+    Control    = mapply(add_stars, Control_Est, res_t3$pValue, Control_SE),
+    Altruistic = mapply(add_stars, Altruistic_Est, res_t1$pValue, Altruistic_SE),
+    Egoistic   = mapply(add_stars, Egoistic_Est, res_t2$pValue, Egoistic_SE),
+    Pooled   = mapply(add_stars, Pooled_Est, res_pooled$pValue, Pooled_SE)
+  ) %>%
+  dplyr::select(Term, Control, Altruistic, Egoistic, Pooled)
+
+
+# Print formatted table
+knitr::kable(summary_table, align = "lccc",
+             caption = "Mixed Logit Coefficients with Standard Errors")
+
+```
+
+
+# 7. WTP Calculation
+
+## 7.1. WTP calculation from main estimate
+
+```{r}
+#summary(mix_t1)
+
+library(tibble)
+library(dplyr)
+
+# Extract coefficients from each model
+coefficients1 <- coef(mix_t1)  # Altruistic
+coefficients2 <- coef(mix_t2)  # Egoistic
+coefficients3 <- coef(mix_t3)  # Control
+coefficients4 <- coef(mix_pooled)  # Pooled
+
+
+# Calculate WTPs using the price coefficient from mix_t1 (as in your code)
+wtp1 <- coefficients1[c("none", "R2", "R3", "E2", "E3", "I2", "M2", "H2", "E2:I2", "E2:M2", "E2:H2","E3:I2", "E3:M2", "E3:H2")] / -coefficients1["Price"]
+wtp2 <- coefficients2[c("none", "R2", "R3", "E2", "E3", "I2", "M2", "H2", "E2:I2", "E2:M2", "E2:H2",  "E3:I2", "E3:M2", "E3:H2")] / -coefficients2["Price"]
+wtp3 <- coefficients3[c("none", "R2", "R3", "E2", "E3", "I2", "M2", "H2", "E2:I2", "E2:M2", "E2:H2",  "E3:I2", "E3:M2", "E3:H2")] / -coefficients3["Price"]
+wtp4 <- coefficients4[c("none", "R2", "R3", "E2", "E3", "I2", "M2", "H2", "E2:I2", "E2:M2", "E2:H2",  "E3:I2", "E3:M2", "E3:H2")] / -coefficients3["Price"]
+
+# Create a tidy WTP table
+wtp_table1 <- tibble(
+  Attribute = names(wtp1),
+  Control    = round(wtp3, 3),
+  Altruistic = round(wtp1, 3),
+  Egoistic   = round(wtp2, 3),
+  Pooled = round(wtp4, 3)
+)
+
+# View the WTP table
+wtp_table1
+
+```
+
+
+
+## 7.2. WTP estimation using Krinsky and Robb method (Prabin Approch)
+
+```{r}
+
+set.seed(123)
+
+# =========================
+# 1) If you used krinsky_wtp() above and want POE,
+#    re-run it ONCE with draws returned:
+# =========================
+krinsky_wtp <- function(model, attributes, price_name = "Price", n_sim = 10000, eps = 1e-6, return_draws = FALSE) {
+  coefs    <- coef(model)
+  vcov_mat <- vcov(model)
+  vcov_pd  <- as.matrix(Matrix::nearPD(vcov_mat)$mat)
+  draws    <- MASS::mvrnorm(n_sim, mu = coefs, Sigma = vcov_pd)
+
+  attr_idx  <- match(attributes, colnames(draws))
+  price_idx <- match(price_name, colnames(draws))
+  if (any(is.na(attr_idx))) stop("Missing attributes: ", paste(attributes[is.na(attr_idx)], collapse=", "))
+  if (is.na(price_idx))     stop("Missing price coefficient: ", price_name)
+
+  # Fieller guard
+  valid <- abs(draws[, price_idx]) > eps
+  draws <- draws[valid, , drop = FALSE]
+
+  wtp_draws <- sapply(attr_idx, function(j) -draws[, j] / draws[, price_idx])
+  colnames(wtp_draws) <- attributes
+
+  summarize_one <- function(x) {
+    lo <- quantile(x, 0.025, na.rm = TRUE)
+    hi <- quantile(x, 0.975, na.rm = TRUE)
+    m  <- mean(x[x >= lo & x <= hi], na.rm = TRUE)
+    p  <- 2 * min(mean(x > 0, na.rm = TRUE), mean(x < 0, na.rm = TRUE))
+    stars <- ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.10, "*", "")))
+    list(mean = m, lo = lo, hi = hi, p = p, stars = stars)
+  }
+
+  out <- lapply(attributes, function(a) {
+    s <- summarize_one(wtp_draws[, a])
+    data.frame(
+      Attribute = a,
+      Mean_WTP  = round(s$mean, 3),
+      Lower_95  = round(s$lo, 3),
+      Upper_95  = round(s$hi, 3),
+      p_value   = round(s$p, 4),
+      stars     = s$stars,
+      Label     = paste0(round(s$mean,3),  s$stars, " [", round(s$lo,3), ", ", round(s$hi,3), "]"),
+      stringsAsFactors = FALSE
+    )
+  }) |> dplyr::bind_rows()
+
+  if (return_draws) list(summary = out, draws = wtp_draws) else out
+}
+
+# ---- specify attributes exactly as in your model object names
+attributes <- c("none", "R2","R3","E2","E3","I2","M2","H2",
+                "E2:I2","E2:M2","E2:H2","E3:I2","E3:M2","E3:H2")
+
+# Run with draws for each treatment (once):
+ctl <- krinsky_wtp(mix_t3, attributes, price_name = "Price", return_draws = TRUE)  # Control
+alt <- krinsky_wtp(mix_t1, attributes, price_name = "Price", return_draws = TRUE)  # Altruistic
+ego <- krinsky_wtp(mix_t2, attributes, price_name = "Price", return_draws = TRUE)  # Egoistic
+pooled <- krinsky_wtp(mix_pooled, attributes, price_name = "Price", return_draws = TRUE)
+
+# =========================
+# 2) Build the summary label table (same as before)
+# =========================
+wtp_table <- dplyr::bind_rows(
+  ctl$summary |> dplyr::mutate(Treatment = "Control"),
+  alt$summary |> dplyr::mutate(Treatment = "Altruistic"),
+  ego$summary |> dplyr::mutate(Treatment = "Egoistic"),
+  pooled$summary |> dplyr::mutate(Treatment = "Pooled")
+) |>
+  dplyr::select(Attribute, Treatment, Label) |>
+  tidyr::pivot_wider(names_from = Treatment, values_from = Label)
+
+print(wtp_table)
+
+```
+
+## 7.3. POE Test
+
+```{r}
+# 3) POE between groups for ALL attributes
+#    POE = Pr(A - B > 0); two-sided p = 2 * min(POE, 1-POE)
+# =========================
+poe_between <- function(draws_A, draws_B) {
+  # Align draw counts
+  n <- min(nrow(draws_A), nrow(draws_B))
+  A <- draws_A[seq_len(n), , drop = FALSE]
+  B <- draws_B[seq_len(n), , drop = FALSE]
+  attrs <- intersect(colnames(A), colnames(B))
+
+  res <- lapply(attrs, function(a) {
+    d <- A[, a] - B[, a]
+    d <- d[is.finite(d)]
+    if (length(d) < 2) return(data.frame(Attribute = a, POE = NA_real_, p_value = NA_real_, stars = ""))
+    poe <- mean(d > 0)
+    p2  <- 2 * min(poe, 1 - poe)
+    stars <- ifelse(is.na(p2), "", 
+               ifelse(p2 < 0.01,  "***",
+               ifelse(p2 < 0.05,  "**",
+               ifelse(p2 < 0.10,  "*", ""))))
+    data.frame(Attribute = a, POE = round(poe, 3), p_value = round(p2, 4), stars = stars)
+  }) |> dplyr::bind_rows()
+
+  res
+}
+
+poe_alt_vs_ctl <- poe_between(alt$draws, ctl$draws) |> dplyr::mutate(Contrast = "Altruistic > Control")
+poe_ego_vs_ctl <- poe_between(ego$draws, ctl$draws) |> dplyr::mutate(Contrast = "Egoistic > Control")
+poe_alt_vs_ego <- poe_between(alt$draws, ego$draws) |> dplyr::mutate(Contrast = "Altruistic > Egoistic")
+
+poe_all <- dplyr::bind_rows(poe_alt_vs_ctl, poe_ego_vs_ctl, poe_alt_vs_ego) |>
+  dplyr::relocate(Contrast, .before = Attribute) |>
+  dplyr::arrange(Contrast, Attribute)
+
+print(poe_all)
+
+# Optional: compact wide table
+poe_wide <- poe_all |>
+  dplyr::mutate(Stat = paste0("POE=", POE, "; p=", p_value, " ", stars)) |>
+  dplyr::select(Attribute, Contrast, Stat) |>
+  tidyr::pivot_wider(names_from = Contrast, values_from = Stat)
+
+print(poe_wide)
+
+
+# Optional: compact wide table
+poe_wide_pvalue <- poe_all |>
+  dplyr::mutate(Stat = paste0(" ", p_value, " ", stars)) |>
+  dplyr::select(Attribute, Contrast, Stat) |>
+  tidyr::pivot_wider(names_from = Contrast, values_from = Stat)
+
+print(poe_wide_pvalue)
+
+# Define the order you want
+attr_order <- c("R2","R3","E2","E3","I2","M2","H2",
+                "E2:I2","E2:M2","E2:H2","E3:I2","E3:M2","E3:H2")
+
+# Apply the factor levels to POE results
+poe_all <- poe_all %>%
+  dplyr::mutate(Attribute = factor(Attribute, levels = attr_order)) %>%
+  dplyr::arrange(Contrast, Attribute)
+
+poe_wide <- poe_wide %>%
+  dplyr::mutate(Attribute = factor(Attribute, levels = attr_order)) %>%
+  dplyr::arrange(Attribute)
+
+poe_wide_pvalue <- poe_wide_pvalue %>%
+  dplyr::mutate(Attribute = factor(Attribute, levels = attr_order)) %>%
+  dplyr::arrange(Attribute)
+
+
+```
+
+# 8. Valuation of Regaulatory oversight
+
+```{r}
+# ΔReg = WTP(E2) - WTP(E3), summarized with mean/CI/p-value
+delta_reg_from_draws <- function(wtp_draws, inspected = "E2", exempt = "E3", level = 0.95) {
+  stopifnot(inspected %in% colnames(wtp_draws), exempt %in% colnames(wtp_draws))
+  dR <- wtp_draws[, inspected] - wtp_draws[, exempt]
+  a <- (1 - level) / 2
+  ci <- quantile(dR, c(a, 1 - a), na.rm = TRUE)
+  est <- mean(dR, na.rm = TRUE)
+  p   <- 2 * min(mean(dR > 0, na.rm = TRUE), mean(dR < 0, na.rm = TRUE))
+  stars <- ifelse(p < 0.01, "***", ifelse(p < 0.05, "**", ifelse(p < 0.10, "*", "")))
+  data.frame(Estimate = round(est, 3),
+             Lower_95 = round(ci[1], 3),
+             Upper_95 = round(ci[2], 3),
+             p_value  = round(p, 4),
+             stars    = stars)
+}
+
+# Produce ΔReg for each treatment (E2 = inspected/licensed, E3 = exempt)
+delta_control   <- delta_reg_from_draws(ctl$draws,    "E2", "E3") %>% dplyr::mutate(Treatment="Control")
+delta_altru     <- delta_reg_from_draws(alt$draws,    "E2", "E3") %>% dplyr::mutate(Treatment="Altruistic")
+delta_egoistic  <- delta_reg_from_draws(ego$draws,    "E2", "E3") %>% dplyr::mutate(Treatment="Egoistic")
+delta_pooled    <- delta_reg_from_draws(pooled$draws, "E2", "E3") %>% dplyr::mutate(Treatment="Pooled")
+
+delta_reg_table <- dplyr::bind_rows(delta_control, delta_altru, delta_egoistic, delta_pooled) %>%
+  dplyr::select(Treatment, Estimate, Lower_95, Upper_95, p_value, stars)
+
+print(delta_reg_table)
+
+
+
+```
+
+# 8 Test for substitution Hypothesis
+
+“Across treatments, adding Food Handler certification to an exempt home kitchen raises WTP enough to match or exceed an inspected home kitchen. Insurance also compensates in two of three treatments, while Manager certification compensates in Control (borderline) and Altruistic but not Egoistic. Thus, private signals—especially the Handler certificate—can fully offset the absence of inspection, though effects vary by motivational framing.”
+
+- Test in the utility space
+
+D = (Bhk,exempt + Bc + Bhk,exempt*C) - Bhk,inspected
+
+D>= 0, full substitution,
+D<0, partial substitution
+
+# 8 Test for substitution Hypothesis
+
+```{r}
+# ---- Full substitution: ΔWTP = WTP(HK Exempt + Credential) − WTP(HK Inspected) ----
+# H0: ΔWTP <= 0 vs H1: ΔWTP > 0  (one-sided)
+
+library(dplyr)
+library(ggplot2)
+library(MASS)
+library(Matrix)
+
+analyze_full_substitution <- function(model, n_sim = 10000, eps = 1e-6) {
+  V  <- vcov(model)
+  Vp <- as.matrix(Matrix::nearPD(V)$mat)
+  B  <- MASS::mvrnorm(n_sim, mu = coef(model), Sigma = Vp)
+
+  need <- c("E3","E2","M2","H2","I2","E3:M2","E3:H2","E3:I2","Price")
+  miss <- setdiff(need, colnames(B))
+  if (length(miss)) stop("Missing in model: ", paste(miss, collapse=", "))
+
+  bE3   <- B[, "E3"];  bE2 <- B[, "E2"]
+  bM2   <- B[, "M2"];  bH2 <- B[, "H2"];  bI2 <- B[, "I2"]
+  bE3M2 <- B[, "E3:M2"]; bE3H2 <- B[, "E3:H2"]; bE3I2 <- B[, "E3:I2"]
+  a     <- B[, "Price"]
+
+  D_mgr_util  <- (bE3 + bM2 + bE3M2) - bE2
+  D_hand_util <- (bE3 + bH2 + bE3H2) - bE2
+  D_ins_util  <- (bE3 + bI2 + bE3I2) - bE2
+
+  ok <- abs(a) > eps
+  D_mgr_wtp  <- D_mgr_util[ok]  / (-a[ok])
+  D_hand_wtp <- D_hand_util[ok] / (-a[ok])
+  D_ins_wtp  <- D_ins_util[ok]  / (-a[ok])
+
+  summarize <- function(x) {
+    ci <- quantile(x, c(0.025, 0.975), na.rm = TRUE)
+    p  <- mean(x <= 0, na.rm = TRUE)   # one-sided p for H0: D <= 0
+    c(mean = mean(x, na.rm = TRUE), lo = ci[1], hi = ci[2], p_one_sided = p)
+  }
+
+  list(
+    "Manager Certificate"   = summarize(D_mgr_wtp),
+    "Handler Certificate"   = summarize(D_hand_wtp),
+    "Liability Insurance"   = summarize(D_ins_wtp)
+  )
+}
+
+set.seed(123)
+res_ctl    <- analyze_full_substitution(mix_t3)
+res_alt    <- analyze_full_substitution(mix_t1)
+res_ego    <- analyze_full_substitution(mix_t2)
+res_pooled <- analyze_full_substitution(mix_pooled)
+
+to_df <- function(res_list, trt) {
+  tibble(
+    Signal = names(res_list),
+    Mean   = sapply(res_list, `[[`, "mean"),
+    Lo     = sapply(res_list, `[[`, "lo"),
+    Hi     = sapply(res_list, `[[`, "hi"),
+    p      = sapply(res_list, `[[`, "p_one_sided"),
+    Treatment = trt
+  )
+}
+
+# --- Robust binder for full-substitution results ---
+to_df <- function(res_list, trt) {
+  df <- as.data.frame(do.call(rbind, res_list), stringsAsFactors = FALSE)
+  df$Signal <- rownames(df); rownames(df) <- NULL
+
+  # normalize column names
+  nm <- names(df)
+  nm[nm == "mean"]        <- "Mean"
+  nm[nm == "lo"]          <- "Lo"
+  nm[nm == "hi"]          <- "Hi"
+  nm[nm == "lo.2.5%"]     <- "Lo"
+  nm[nm == "hi.97.5%"]    <- "Hi"
+  nm[nm == "p_one_sided"] <- "p"
+  names(df) <- nm
+
+  stopifnot(all(c("Mean","Lo","Hi","p") %in% names(df)))
+  dplyr::tibble(dplyr::select(df, Signal, Mean, Lo, Hi, p),
+                Treatment = trt)
+}
+
+# --- Re-run full substitution (keep your analyze_full_substitution as defined) ---
+set.seed(123)
+res_ctl    <- analyze_full_substitution(mix_t3)
+res_alt    <- analyze_full_substitution(mix_t1)
+res_ego    <- analyze_full_substitution(mix_t2)
+res_pooled <- analyze_full_substitution(mix_pooled)
+
+full_results <- dplyr::bind_rows(
+  to_df(res_ctl,    "Control"),
+  to_df(res_alt,    "Altruistic"),
+  to_df(res_ego,    "Egoistic"),
+  to_df(res_pooled, "Pooled")
+)
+
+# --- Same styling/labels as the partial plot ---
+comp_full <- full_results %>%
+  dplyr::mutate(
+    Signal = factor(Signal,
+      levels = c("Handler Certificate","Liability Insurance","Manager Certificate")),
+    Treatment = factor(Treatment, levels = c("Control","Altruistic","Egoistic","Pooled")),
+    stars = dplyr::case_when(
+      p < 0.001 ~ "***",
+      p < 0.01  ~ "**",
+      p < 0.05  ~ "*",
+      p < 0.10  ~ ".",
+      TRUE ~ ""
+    )
+  )
+
+pd <- position_dodge(width = 0.6)
+
+ggplot(comp_full, aes(x = Signal, y = Mean, color = Treatment)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(position = pd, size = 3) +
+  geom_errorbar(aes(ymin = Lo, ymax = Hi), position = pd, width = 0.18) +
+  geom_text(aes(label = stars), position = pd, vjust = -1.1, size = 7, show.legend = FALSE) +
+  labs(
+    title = " ",
+    x = NULL, y = "ΔWTP (Full Substitution), 95% CI"
+  ) +
+  guides(color = guide_legend(title = NULL)) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.text.x = element_text(size = 11))
+
+pd <- position_dodge(width = 0.6)
+
+ggplot(comp_full, aes(x = Signal, y = Mean, shape = Treatment)) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.8, colour = "black") +
+  geom_errorbar(aes(ymin = Lo, ymax = Hi, group = Treatment),
+                position = pd, width = 0.18, linewidth = 0.9, colour = "black") +
+  geom_point(position = pd, size = 3.8, stroke = 1.1, colour = "black") +
+  geom_text(aes(label = stars, group = Treatment),
+            position = pd, vjust = -1.1, size = 7, colour = "black", show.legend = FALSE) +
+  scale_shape_manual(values = c(Control = 16, Altruistic = 17, Egoistic = 15, Pooled = 18)) +
+  labs(title = " ", x = NULL, y = "ΔWTP (Full Substitution), 95% CI") +
+  guides(shape = guide_legend(title = NULL)) +
+  theme_bw(base_size = 14) +
+  theme(plot.title = element_text(face = "bold"),
+        panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(size = 13, face = "bold"),
+        axis.title.y = element_text(size = 16, face = "bold"),
+        legend.position = "bottom")
+
+```
+
+
+
+# 9. Test for Market Competitveess
+D = (Bhk,exempt + Bc + Bhk,exempt*C) 
+
+H0: D=0; Ha: D>0
+
+“Relative to the restaurant baseline, exempt home kitchens with any certificate command a positive and significant WTP, indicating that certificates can partially substitute for regulatory oversight. The handler certificate shows the strongest compensatory effect ($5.6, 95% CI 3.1–8.8, p < 0.001).”
+
+```{r}
+# PARTIAL substitution: D = E3 + C + E3:C   (in WTP space)
+# H0: D <= 0  vs  H1: D > 0  (one–sided)
+analyze_partial_substitution <- function(model, n_sim = 10000, eps = 1e-6,
+                                         creds = c("I2","M2","H2")) {
+  # draws
+  V  <- vcov(model)
+  Vp <- as.matrix(Matrix::nearPD(V)$mat)
+  b0 <- coef(model)
+  B  <- MASS::mvrnorm(n_sim, mu = b0, Sigma = Vp)
+
+  need <- c("E3","Price", creds, paste0("E3:", creds))
+  miss <- setdiff(need, colnames(B))
+  if (length(miss)) stop("Missing in model: ", paste(miss, collapse=", "))
+
+  a  <- B[, "Price"]
+  e3 <- B[, "E3"]
+
+  one_cred <- function(cn) {
+    D_util <- e3 + B[, cn] + B[, paste0("E3:", cn)]
+    ok <- abs(a) > eps
+    D_wtp <- D_util[ok] / (-a[ok])              # convert to WTP
+    ci <- quantile(D_wtp, c(0.025, 0.975), na.rm = TRUE)
+    est <- mean(D_wtp, na.rm = TRUE)
+    p   <- mean(D_wtp <= 0, na.rm = TRUE)       # one-sided p for H0: D<=0
+    data.frame(Signal = cn, Mean = est, Lo = ci[1], Hi = ci[2], p_one_sided = p)
+  }
+
+  do.call(rbind, lapply(creds, one_cred))
+}
+
+# --- Run for each treatment ---
+set.seed(123)
+part_ctl    <- analyze_partial_substitution(mix_t3)
+part_alt    <- analyze_partial_substitution(mix_t1)
+part_ego    <- analyze_partial_substitution(mix_t2)
+part_pooled <- analyze_partial_substitution(mix_pooled)
+
+part_ctl; part_alt; part_ego; part_pooled
+
+
+library(dplyr)
+library(ggplot2)
+
+# 1) Build the combined results table
+partial_results <- bind_rows(
+  mutate(part_ctl,    Treatment = "Control"),
+  mutate(part_alt,    Treatment = "Altruistic"),
+  mutate(part_ego,    Treatment = "Egoistic"),
+  mutate(part_pooled, Treatment = "Pooled")
+)
+
+# 2) Consistent labels and ordering
+comp_df <- partial_results %>%
+  mutate(
+    Signal = recode(
+      Signal,
+      I2 = "Liability Insurance",
+      M2 = "Manager Certificate",
+      H2 = "Handler Certificate"
+    ),
+    Signal = factor(Signal,
+      levels = c("Handler Certificate", "Liability Insurance", "Manager Certificate")
+    ),
+    stars = case_when(
+      p_one_sided < 0.001 ~ "***",
+      p_one_sided < 0.01  ~ "**",
+      p_one_sided < 0.05  ~ "*",
+      p_one_sided < 0.10  ~ ".",
+      TRUE ~ ""
+    )
+  ) %>%
+  rename(mean = Mean, lo = Lo, hi = Hi, p = p_one_sided)
+
+pd2 <- position_dodge(width = 0.6)
+
+ggplot(comp_df, aes(x = Signal, y = mean, color = Treatment)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  geom_point(position = pd2, size = 3) +
+  geom_errorbar(aes(ymin = lo, ymax = hi), position = pd2, width = 0.18) +
+  geom_text(aes(label = stars), position = pd2, vjust = -1.1, size = 4, show.legend = FALSE) +
+  labs(
+    title = "",
+    x = NULL, y = "ΔWTP (Parity), 95% CI"
+  ) +
+  theme_minimal(base_size = 12)
+
+# enforce desired left-to-right and legend order
+comp_df <- comp_df %>%
+  dplyr::mutate(
+    Treatment = factor(Treatment,
+      levels = c("Control", "Altruistic", "Egoistic", "Pooled")
+    )
+  )
+
+pd2 <- position_dodge(width = 0.6)
+
+ggplot(comp_df, aes(x = Signal, y = mean, shape = Treatment)) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.8, colour = "black") +
+  geom_errorbar(aes(ymin = lo, ymax = hi, group = Treatment),
+                position = pd2, width = 0.18, linewidth = 0.9, colour = "black") +
+  geom_point(position = pd2, size = 3.8, stroke = 1.1, colour = "black") +
+  geom_text(aes(label = stars, group = Treatment),
+            position = pd2, vjust = -1.0, size = 7, show.legend = FALSE) +
+  scale_shape_manual(values = c(Control = 16, Altruistic = 17, Egoistic = 15, Pooled = 18)) +  # Control, Altruistic, Egoistic, Pooled
+  labs(title = "", x = NULL, y = "ΔWTP (Parity), 95% CI") +
+  theme_bw(base_size = 14) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.title.y = element_text(size = 16, face = "bold"),
+        axis.text = element_text(size = 13, face = "bold"),
+        legend.position = "bottom",
+        legend.title = element_blank())
+
+
+```
+
+
+# 8. Create a graph comparing the WTP estimates
+
+## 8.1. Collective graph for all treatments
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# First, check what column names you actually have
+print(colnames(wtp_table))
+
+# Combine the data from your new Krinsky-Robb results
+wtp_table <- bind_rows(
+  ctl$summary %>% mutate(Treatment = "Control"),
+  alt$summary %>% mutate(Treatment = "Altruistic"), 
+  ego$summary %>% mutate(Treatment = "Egoistic")
+) %>%
+  mutate(
+    Attribute = factor(
+      Attribute,
+      levels = c("none", "E2", "E3", "H2", "I2", "M2", "R2", "R3", "E2:I2", "E2:M2", "E2:H2", "E3:I2", "E3:M2", "E3:H2"),
+      labels = c("Neither",
+        "Home Kitchen Inspected",
+        "Home Kitchen Exempt", 
+        "Food Handler Certificate",
+        "Liability Insurance",
+        "Manager Certificate",
+        "4-star",
+        "5-star",
+        "HK(inspected): Insurance",
+        "HK(inspected)*ManagerCertificate",
+        "HK(inspected)*HandlerCertificate",
+        "HK(exempt)*Insurance",
+        "HK(exempt)*ManagerCert",
+        "HK(exempt)*HandlerCert"
+      )
+    )
+  )
+
+# Reorder Treatment so Control is first
+wtp_table$Treatment <- factor(
+  wtp_table$Treatment,
+  levels = c("Control", "Altruistic", "Egoistic")
+)
+
+```
+
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Your data already has the right structure, just use the correct column names
+# CORRECTED PLOT: Use the actual column names from your data (Lower_95, Upper_95)
+ggplot(wtp_table, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  # Use the correct column names that actually exist in your data
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "WTP Comparison across Control, Altruistic and Egoistic",
+       y = "Mean WTP with 95% CI",
+       x = "Product Attributes") +
+  scale_fill_manual(values = c("Control" = "#cccccc", 
+                               "Altruistic" = "#8fb3d9", 
+                               "Egoistic" = "#a6d96a")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+    axis.text.x = element_text(angle = 40, hjust = 1, size = 12, colour = "black"),
+    axis.text.y = element_text(face = "bold", size = 14, color = "black"),
+    axis.title.y = element_text(size = 12, color = "black", vjust = 1),
+    axis.title.x = element_text(face = "bold", size = 14, color = "black", vjust = 1)
+  ) +
+  # Add a horizontal line at zero for reference
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50", alpha = 0.7)
+```
+
+
+
+
+```{r}
+# Filter to only include Home Kitchen Inspected and Home Kitchen Exempt
+wtp_subset <- wtp_table %>%
+  filter(Attribute %in% c("Home Kitchen Inspected", "Home Kitchen Exempt"))
+
+# Plot the subset
+ggplot(wtp_subset, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Home Kitchen (Inspected & Licensed) VS. Home Kitchen (Exempt)",
+       y = "Mean WTP with 95% CI",
+       x = "Food Establishment Attribute") +
+  scale_fill_manual(values = c("Control" = "#cccccc", 
+                               "Altruistic" = "#8fb3d9", 
+                               "Egoistic" = "#a6d96a")) +
+  theme_minimal() +
+theme(
+  plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+  axis.text.y = element_text(face = "bold", size = 14, color = "black"),           # Y-axis tick labels (bolder, larger, black)
+  axis.title.y = element_text(size = 12, color = "black", vjust = 1), # Y-axis title (bolder, larger, black)
+  axis.title.x = element_text(face = "bold", size = 14, color = "black", vjust = 1), #
+  axis.text.x = element_text(size = 14, color = "black")                                           # X-axis labels (already adjusted)
+)
+
+```
+
+
+
+```{r}
+
+# Filter to only include Home Kitchen Inspected and Home Kitchen Exempt
+wtp_subset1 <- wtp_table %>%
+  filter(Attribute %in% c("Food Handler Certificate", "Liability Insurance", "Manager Certificate", "4-star", "5-star"))
+
+
+# Plot the subset
+ggplot(wtp_subset1, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Effect of Food Safety Cues on WTP Across Treatments",
+       y = "Mean WTP with 95% CI",
+       x = "Food Establishment Attribute") +
+  scale_fill_manual(values = c("Control" = "#cccccc", 
+                               "Altruistic" = "#8fb3d9", 
+                               "Egoistic" = "#a6d96a")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    axis.text.y = element_text(face = "bold", size = 14, color = "black"),
+    axis.title.y = element_text(size = 12, color = "black", vjust = 1),
+    axis.title.x = element_text(face = "bold", size = 14, color = "black", vjust = 1),
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 12, color = "black"),
+    plot.margin = margin(t = 10, r = 20, b = 50, l = 10)
+  )
+
+
+
+```
+
+
+```{r}
+# Filter to only include Home Kitchen Inspected and Home Kitchen Exempt
+wtp_subset1 <- wtp_table %>%
+  filter(Attribute %in% c("HK(inspected)* Insurance",
+  "HK(inspected)* MangerCertificate",
+  "HK(inspected)*HandlerCertificate", "HK(exempt)*Insurance", "HK(exempt)*ManagerCert", "HK(exempt)*HandlerCert" ))
+
+
+# Plot the subset
+ggplot(wtp_subset1, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95),
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Effect of Food Safety Cues on WTP Across Treatments",
+       y = "Mean WTP with 95% CI",
+       x = "Food Establishment Attribute") +
+  scale_fill_manual(values = c("Control" = "#cccccc", 
+                               "Altruistic" = "#8fb3d9", 
+                               "Egoistic" = "#a6d96a")) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    axis.text.y = element_text(face = "bold", size = 14, color = "black"),
+    axis.title.y = element_text(size = 12, color = "black", vjust = 1),
+    axis.title.x = element_text(face = "bold", size = 14, color = "black", vjust = 1),
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 12, color = "black"),
+    plot.margin = margin(t = 10, r = 20, b = 50, l = 10)
+  )
+
+```
+
+
+## 8.2. Separate graph for all treatments
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Combine all WTP data into one dataframe
+wtp_all <- bind_rows(
+  wtp_control %>% mutate(Treatment = "Control"),
+  wtp_altruistic %>% mutate(Treatment = "Altruistic"),
+  wtp_egoistic %>% mutate(Treatment = "Egoistic")
+)
+
+# Create comparison datasets
+wtp_comp1 <- wtp_all %>% 
+  filter(Treatment %in% c("Control", "Altruistic")) %>%
+  mutate(Comparison = "Altruistic vs Control")
+
+wtp_comp2 <- wtp_all %>% 
+  filter(Treatment %in% c("Control", "Egoistic")) %>%
+  mutate(Comparison = "Egoistic vs Control")
+
+# Combine for plotting
+plot_data <- bind_rows(wtp_comp1, wtp_comp2)
+
+# Rename the attributes as requested
+plot_data <- plot_data %>%
+  mutate(
+    Attribute = factor(
+      Attribute,
+      levels = c("E2", "E3", "H2", "I2", "M2", "R2", "R3"),
+      labels = c(
+        "Home Kitchen Inspected",
+        "Home Kitchen Exempt",
+        "Food Handler Certificate",
+        "Liability Insurance",
+        "Manager Certificate",
+        "4-star",
+        "5-star"
+      )
+    )
+  )
+
+# Generate comparison plot
+ggplot(plot_data, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95), 
+                width = 0.2, position = position_dodge(0.9)) +
+  facet_wrap(~Comparison, ncol = 2) +
+  labs(title = "Willingness-to-Pay (WTP) Comparison",
+       y = "Mean WTP with 95% CI",
+       x = "Product Attributes") +
+  scale_fill_manual(values = c("Control" = "#1f77b4", 
+                               "Altruistic" = "#ff7f0e", 
+                               "Egoistic" = "#2ca02c")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Compare across Food establishments
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Combine all WTP data into one dataframe
+wtp_all <- bind_rows(
+  wtp_control %>% mutate(Treatment = "Control"),
+  wtp_altruistic %>% mutate(Treatment = "Altruistic"),
+  wtp_egoistic %>% mutate(Treatment = "Egoistic")
+)
+
+# Create comparison datasets
+wtp_comp1 <- wtp_all %>% 
+  filter(Treatment %in% c("Control", "Altruistic")) %>%
+  mutate(Comparison = "Altruistic vs Control")
+
+wtp_comp2 <- wtp_all %>% 
+  filter(Treatment %in% c("Control", "Egoistic")) %>%
+  mutate(Comparison = "Egoistic vs Control")
+
+# Combine for plotting
+plot_data <- bind_rows(wtp_comp1, wtp_comp2)
+
+# Rename the attributes as requested
+plot_data <- plot_data %>%
+  mutate(
+    Attribute = factor(
+      Attribute,
+      levels = c("E2", "E3"),
+      labels = c(
+        "Home Kitchen Inspected",
+        "Home Kitchen Exempt"
+      )
+    )
+  )
+
+# Generate comparison plot
+ggplot(plot_data, aes(x = Attribute, y = Mean_WTP, fill = Treatment)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  geom_errorbar(aes(ymin = Lower_95, ymax = Upper_95), 
+                width = 0.2, position = position_dodge(0.9)) +
+  facet_wrap(~Comparison, ncol = 2) +
+  labs(title = "Willingness-to-Pay (WTP) Comparison",
+       y = "Mean WTP with 95% CI",
+       x = "Product Attributes") +
+  scale_fill_manual(values = c("Control" = "#1f77b4", 
+                               "Altruistic" = "#ff7f0e", 
+                               "Egoistic" = "#2ca02c")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+## 8.3. Test comparison
+
+```{r}
+# Example for all attributes (adjust as needed)
+attributes <- c("mean.R2", "mean.R3", "mean.E2", "mean.E3", "mean.I2", "mean.H2", "mean.M2")
+
+for (attr in attributes) {
+  wtp_t1 <- WTP.Mix.t1[, attr]
+  wtp_t2 <- WTP.Mix.t2[, attr]
+  wtp_t3 <- WTP.Mix.t3[, attr]
+  
+  cat("\n---", attr, "---\n")
+  cat("Altruistic vs Control:\n")
+  print(t.test(wtp_t1, wtp_t3))
+  cat("\nEgoistic vs Control:\n")
+  print(t.test(wtp_t2, wtp_t3))
+}
+
+```
+
+
+```{r}
+# Explicitly use dplyr functions with namespace resolution
+wtp_diff <- wtp_altruistic %>%
+  dplyr::select(Attribute, Mean_WTP, Lower_95, Upper_95) %>%
+  dplyr::rename(Mean_Altruistic = Mean_WTP, 
+                Lower_Altruistic = Lower_95, 
+                Upper_Altruistic = Upper_95) %>%
+  dplyr::left_join(
+    wtp_control %>%
+      dplyr::select(Attribute, Mean_WTP, Lower_95, Upper_95) %>%
+      dplyr::rename(Mean_Control = Mean_WTP, 
+                    Lower_Control = Lower_95, 
+                    Upper_Control = Upper_95),
+    by = "Attribute"
+  ) %>%
+  dplyr::mutate(Difference = Mean_Altruistic - Mean_Control)
+
+# View results
+print(wtp_diff)
+
+
+for (attr in unique(wtp_diff$Attribute)) {
+  row <- wtp_diff[wtp_diff$Attribute == attr,]
+  if (row$Upper_Altruistic < row$Lower_Control || row$Upper_Control < row$Lower_Altruistic) {
+    cat(attr, ": Mean WTP is statistically different (confidence intervals do not overlap)\n")
+  } else {
+    cat(attr, ": Mean WTP is not statistically different (confidence intervals overlap)\n")
+  }
+}
+
+```
+
+
+
+
+
+
+## 7.3. WTP estimation using Krinsky and Robb method (Old approch)
+
+```{r}
+# library(MASS)
+# library(Matrix)
+# library(dplyr)
+# library(tidyr)
+# 
+# set.seed(123)
+# 
+# # Krinsky & Robb WTP with empirical p-values and stars
+# krinsky_wtp <- function(model, attributes, price_name = "Price", n_sim = 10000) {
+#   coefs    <- coef(model)
+#   vcov_mat <- vcov(model)
+# 
+#   # ensure PD
+#   vcov_pd  <- as.matrix(nearPD(vcov_mat)$mat)
+# 
+#   # simulate coefficient draws
+#   draws <- mvrnorm(n_sim, mu = coefs, Sigma = vcov_pd)
+# 
+#   # index check
+#   attr_idx  <- match(attributes, colnames(draws))
+#   price_idx <- match(price_name, colnames(draws))
+#   if (any(is.na(attr_idx))) {
+#     stop("Some attributes not found in model coefficients: ",
+#          paste(attributes[is.na(attr_idx)], collapse = ", "))
+#   }
+#   if (is.na(price_idx)) stop("Price coefficient not found: ", price_name)
+# 
+#   # compute WTP draws: -beta_attr / beta_price (elementwise by column)
+#   wtp_draws <- sapply(attr_idx, function(j) -draws[, j] / draws[, price_idx])
+#   colnames(wtp_draws) <- attributes
+# 
+#   # summarise per attribute
+#   out <- lapply(attributes, function(a) {
+#     x <- wtp_draws[, a]
+#     # empirical two-sided p-value
+#     p_emp <- 2 * min(mean(x > 0, na.rm = TRUE), mean(x < 0, na.rm = TRUE))
+#     stars <- ifelse(p_emp < 0.001, "***",
+#              ifelse(p_emp < 0.01,  "**",
+#              ifelse(p_emp < 0.05,  "*",
+#              ifelse(p_emp < 0.10,  ".", ""))))
+#     tibble(
+#       Attribute = a,
+#       Mean_WTP = mean(x, na.rm = TRUE),
+#       Lower_95 = quantile(x, 0.025, na.rm = TRUE),
+#       Upper_95 = quantile(x, 0.975, na.rm = TRUE),
+#       p_value  = p_emp,
+#       stars    = stars
+#     )
+#   }) |> bind_rows()
+# 
+#   out |>
+#     mutate(across(c(Mean_WTP, Lower_95, Upper_95), ~round(.x, 3)),
+#            Label = paste0(Mean_WTP, " [", Lower_95, ", ", Upper_95, "]", stars))
+# }
+# 
+# # ---- specify attributes exactly as in your model object names
+# attributes <- c("R2","R3","E2","E3","I2","M2","H2",
+#                 "E2:I2","E2:M2","E2:H2","E3:I2","E3:M2","E3:H2")
+# 
+# # run per treatment model (replace mix_t3/mix_t1/mix_t2 with your fitted objects)
+# wtp_control    <- krinsky_wtp(mix_t3, attributes) |> mutate(Treatment = "Control")
+# wtp_altruistic <- krinsky_wtp(mix_t1, attributes) |> mutate(Treatment = "Altruistic")
+# wtp_egoistic   <- krinsky_wtp(mix_t2, attributes) |> mutate(Treatment = "Egoistic")
+# 
+# # Combine and reshape into wide table
+# wtp_table <- bind_rows(wtp_control, wtp_altruistic, wtp_egoistic) %>%
+#   dplyr::select(Attribute, Treatment, Label) %>%
+#   pivot_wider(names_from = Treatment, values_from = Label)
+# 
+# # View the final table
+# print(wtp_table)
+```
+
+
+
+
+## 7.2.  WTP from based on the Individual WTP estimates
+
+```{r}
+# library(dplyr)
+# library(tidyr)
+# library(forcats)
+# 
+# # Sample size from your WTP matrix
+# n_t1 <- nrow(WTP.Mix.t1)  # should reflect correct number of respondents
+# confidence_level <- 0.95
+# z_score <- qnorm(1 - (1 - confidence_level) / 2)
+# 
+# # Function to calculate confidence interval
+# calculate_ci <- function(mean_value, sd_value, n, zscore) {
+#   margin_of_error <- zscore * (sd_value / sqrt(n))
+#   lower_bound <- mean_value - margin_of_error
+#   upper_bound <- mean_value + margin_of_error
+#   return(paste0("(", round(lower_bound, 3), ", ", round(upper_bound, 3), ")"))
+# }
+# 
+# # Summarize individual-level WTP estimates
+# Avg_WTP_Altruistic <- WTP.Mix.t1 %>%
+#   pivot_longer(cols = everything(), names_to = "Attribute", values_to = "value") %>%
+#   group_by(Attribute = fct_inorder(Attribute)) %>%
+#   summarise(
+#     Mean_WTP = round(mean(value, na.rm = TRUE), 3),
+#     SD = round(sd(value, na.rm = TRUE), 3)
+#   ) %>%
+#   mutate(
+#     CI_95 = mapply(calculate_ci, Mean_WTP, SD, MoreArgs = list(n = n_t1, zscore = z_score))
+#   ) %>%
+#   dplyr::select(-SD)
+# 
+# # Rename attributes to readable labels (adjust as needed)
+# custom_labels <- c(
+#   "R2" = "4-star",
+#   "R3" = "5-star",
+#   "E2" = "HK (Inspected)",
+#   "E3" = "HK (Exempt)",
+#   "I2" = "Insurance",
+#   "M2" = "Manager_Certificate",
+#   "H2" = "Handler_Certificate",
+#    "E2:I2" = "HK(inspected): Insurance",
+#   "E2:M2" = "HK(inspected): MangerCertificate",
+#   "E2:H2" = "HK(inspected): HandlerCertificate",
+#   "E3:I2" = "HK(exempt): Insurance",
+#   "E3:M2" = "HK(exempt): MangerCertificate",
+#   "E3:H2" = "HK(exempt): HandlerCertificate"
+#  
+#   
+# )
+# 
+# Avg_WTP_Altruistic$Attribute <- custom_labels[Avg_WTP_Altruistic$Attribute]
+# 
+# # Final formatting
+# colnames(Avg_WTP_Altruistic) <- c("Attribute", "Mean WTP", "95% C.I.")
+# 
+# # View the result
+# print(Avg_WTP_Altruistic)
+# 
+# library(dplyr)
+# library(tidyr)
+# library(forcats)
+# library(purrr)
+# 
+# # Custom labels based on actual column names
+# custom_labels <- c(
+#   "mean.R2" = "4-star",
+#   "mean.R3" = "5-star",
+#   "mean.E2" = "HK (Inspected)",
+#   "mean.E3" = "HK (Exempt)",
+#   "mean.I2" = "Insurance",
+#   "mean.M2" = "Manager_Certificate",
+#   "mean.H2" = "Handler_Certificate",
+#   "mean.E2:I2" = "HK(inspected): Insurance",
+#   "mean.E2:M2" = "HK(inspected): MangerCertificate",
+#   "mean.E2:H2" = "HK(inspected): HandlerCertificate",
+#   "mean.E3:I2" = "HK(exempt): Insurance",
+#   "mean.E3:M2" = "HK(exempt): MangerCertificate",
+#   "mean.E3:H2" = "HK(exempt): HandlerCertificate"
+# 
+# )
+# 
+# # 95% CI setup
+# confidence_level <- 0.95
+# z_score <- qnorm(1 - (1 - confidence_level) / 2)
+# 
+# calculate_ci <- function(mean_value, sd_value, n, zscore) {
+#   margin_of_error <- zscore * (sd_value / sqrt(n))
+#   lower_bound <- mean_value - margin_of_error
+#   upper_bound <- mean_value + margin_of_error
+#   return(paste0(round(lower_bound, 3), ", ", round(upper_bound, 3)))
+# }
+# 
+# # WTP summarizer function
+# summarize_wtp <- function(wtp_matrix, treatment_name) {
+#   n <- nrow(wtp_matrix)
+#   available_cols <- intersect(colnames(wtp_matrix), names(custom_labels))
+#   if (length(available_cols) == 0) stop("No matching attributes found in the WTP matrix.")
+# 
+#   wtp_summary <- wtp_matrix[, available_cols] %>%
+#     pivot_longer(cols = everything(), names_to = "Attribute", values_to = "value") %>%
+#     group_by(Attribute = fct_inorder(Attribute)) %>%
+#     summarise(
+#       Mean = round(mean(value, na.rm = TRUE), 3),
+#       SD = round(sd(value, na.rm = TRUE), 3)
+#     ) %>%
+#     mutate(
+#       Label = paste0(Mean, " [", mapply(calculate_ci, Mean, SD, MoreArgs = list(n = n, zscore = z_score)), "]")
+#     ) %>%
+#     dplyr::select(Attribute, !!treatment_name := Label)
+# 
+#   return(wtp_summary)
+# }
+# 
+# # Apply to all treatments
+# wtp_altruistic <- summarize_wtp(WTP.Mix.t1, "Altruistic")
+# wtp_egoistic   <- summarize_wtp(WTP.Mix.t2, "Egoistic")
+# wtp_control    <- summarize_wtp(WTP.Mix.t3, "Control")
+# 
+# # Combine results
+# wtp_combined <- reduce(list( wtp_control, wtp_altruistic, wtp_egoistic), full_join, by = "Attribute")
+# 
+# 
+# #wtp_combined$Attribute <- factor(wtp_combined$Attribute, levels = ordered_labels)
+# wtp_combined <- wtp_combined %>% arrange(Attribute)
+# 
+# # View the result
+# print(wtp_combined)
+
+```
+
+
+
+
+```{r}
+# Load required packages
+library(MASS)
+library(Matrix)
+library(dplyr)
+library(tidyr)
+
+set.seed(123)
+# Krinsky and Robb Simulation Function
+krinsky_wtp_draws <- function(model, attributes, price_name = "Price", n_sim = 1000) {
+  coefs <- coef(model)
+  vcov_mat <- vcov(model)
+  vcov_pd <- as.matrix(nearPD(vcov_mat)$mat)
+  
+  sim_draws <- mvrnorm(n_sim, mu = coefs, Sigma = vcov_pd)
+  attr_idx <- match(attributes, names(coefs))
+  price_idx <- match(price_name, names(coefs))
+  
+  wtp_draws <- -sim_draws[, attr_idx] / sim_draws[, price_idx]
+  colnames(wtp_draws) <- attributes
+  return(wtp_draws)
+}
+
+# Attributes of interest
+attributes <- c("Review", "E1", "E3", "I2", "M2", "H2")
+
+# Run simulation
+wtp_control_draws    <- krinsky_wtp_draws(mix_t3, attributes)
+wtp_altruistic_draws <- krinsky_wtp_draws(mix_t1, attributes)
+wtp_egoistic_draws   <- krinsky_wtp_draws(mix_t2, attributes)
+
+# PoE Test function
+poe_test <- function(control_draws, treat_draws) {
+  diff <- control_draws - treat_draws
+  poe <- colMeans(diff > 0)
+  pval <- 2 * pmin(poe, 1 - poe)
+  return(data.frame(Attribute = names(pval), p_value = round(pval, 4)))
+}
+
+# Run PoE tests
+poe_altruistic <- poe_test(wtp_control_draws, wtp_altruistic_draws)
+poe_egoistic   <- poe_test(wtp_control_draws, wtp_egoistic_draws)
+
+# Step 1: Combine mean WTPs
+wtp_summary <- data.frame(
+  Attribute  = attributes,
+  Control    = round(colMeans(wtp_control_draws), 3),
+  Altruistic = round(colMeans(wtp_altruistic_draws), 3),
+  Egoistic   = round(colMeans(wtp_egoistic_draws), 3)
+)
+
+# Step 2: Merge in p-values
+wtp_summary <- wtp_summary %>%
+  left_join(poe_altruistic, by = "Attribute") %>%
+  rename(p_Altruistic = p_value) %>%
+  left_join(poe_egoistic, by = "Attribute") %>%
+  rename(p_Egoistic = p_value)
+
+# Step 3: Relabel attributes
+attribute_labels <- c(
+  "Review" = "Customer Review",
+  "E1"     = "Restaurant",
+  "E3"     = "HK (Exempt)",
+  "I2"     = "Liability Insurance",
+  "M2"     = "Manager Certificate",
+  "H2"     = "Handler Certificate"
+)
+wtp_summary$Attribute <- attribute_labels[wtp_summary$Attribute]
+
+# Step 4: Final formatted table
+final_table <- wtp_summary %>%
+  dplyr::select(
+    Attribute,
+    Control,
+    Altruistic, p_Altruistic,
+    Egoistic, p_Egoistic
+  )
+
+# Step 5: View
+print(final_table)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+extract_gmnl_clean <- function(model) {
+  # Extract coefficient estimates and standard errors directly
+  est <- coef(model)
+  se <- sqrt(diag(vcov(model)))
+  
+  # Try to get p-values if possible
+  zval <- est / se
+  pval <- 2 * (1 - pnorm(abs(zval)))
+  
+  data.frame(
+    Term = names(est),
+    Estimate = est,
+    SE = se,
+    pValue = pval,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Extract results for each treatment
+res_t_i1 <- extract_gmnl_clean(mix_t_i1) 
+res_t_i2 <- extract_gmnl_clean(mix_t_i2)
+res_t_i3 <- extract_gmnl_clean(mix_t_i3)
+
+# Merge and format
+summary_table <- res_t_i1 %>%
+  rename(Altruistic_Est = Estimate, Altruistic_SE = SE) %>%
+  full_join(res_t_i2 %>% rename(Egoistic_Est = Estimate, Egoistic_SE = SE), by = "Term") %>%
+  full_join(res_t_i3 %>% rename(Control_Est = Estimate, Control_SE = SE), by = "Term") %>%
+  select(Term, contains("Altruistic"), contains("Egoistic"), contains("Control"))
+
+# Format with significance stars
+# Add significance stars function (now with SE as argument)
+add_stars <- function(est, p, se) {
+  stars <- ifelse(p < 0.001, "***",
+           ifelse(p < 0.01, "**",
+           ifelse(p < 0.05, "*",
+           ifelse(p < 0.1, ".", ""))))
+  sprintf("%.3f%s (SE=%.3f)", est, stars, se)
+}
+
+# Now pass the SEs as well
+summary_table <- summary_table %>%
+  mutate(
+    Control    = mapply(add_stars, Control_Est, res_t_i3$pValue, Control_SE),
+    Altruistic = mapply(add_stars, Altruistic_Est, res_t_i1$pValue, Altruistic_SE),
+    Egoistic   = mapply(add_stars, Egoistic_Est, res_t_i2$pValue, Egoistic_SE)
+  ) %>%
+  select(Term, Control, Altruistic, Egoistic)
+
+
+# Print formatted table
+knitr::kable(summary_table, align = "lccc",
+             caption = "Mixed Logit Coefficients with Standard Errors")
+
+```
+
+
+
+
+
+
+
+
+
+
