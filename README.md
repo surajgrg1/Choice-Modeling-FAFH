@@ -1,18 +1,57 @@
-Choice Experiment on Alternative Food-Away-From_Home Outlets
+# Choice Experiment on Alternative Food-Away-From-Home Outlets
 
-Project Overview
+**Author:** Suraj Gurung  
+**Last Updated:** October 8, 2024  
+**Tools:** R  
 
-This project investigates consumer preferences related to the Home Cooking Movement (HCM) through a choice experiment. The analysis focuses on creating an efficient design and applying various statistical models to understand consumer behavior.
-Code Author: Suraj Gurung
-Date Updated: Oct 8, 2024
+---
 
-The project consists of the following main files:
-1. DesignofExperiment.Rmd
-Purpose: This file details the process of creating a D-efficient design for the choice experiment.
+## 📌 Project Overview
 
-2. HCM.Rmd
-Purpose: This file covers the data cleaning, analysis, and modeling aspects (conditional logit and mixed logit model) of the choice experiment.
+This project examines consumer preferences for emerging food-away-from-home outlets within the **Home Cooking Movement (HCM)**. Using a stated **discrete choice experiment**, the analysis estimates how consumers value:
 
-Note: Ensure that all necessary packages or libraries are installed before running the code. You need an older version to run the mixed logit model.
+- Regulatory oversight  
+- Food safety certifications  
+- Customer reviews  
+- Liability insurance signals  
+- Pricing levels  
 
-This project contributes to understanding consumer preferences for alternative food establishments. It is part of ongoing research in the field of food economics.
+The results provide evidence for:
+- Market entry strategies for food entrepreneurs  
+- Pricing decisions and trust-building  
+- Local food safety policy and certification frameworks  
+
+---
+
+## 📁 Project Files
+
+| File Name | Description |
+|-----------|-------------|
+| **`DesignofExperiment.Rmd`** | Creates a D-efficient fractional factorial design for the choice experiment, including attribute level coding, blocking, and priors. |
+| **`HCM.Rmd`** | Performs data cleaning, descriptive analysis, and estimation of Conditional Logit and Mixed Logit models to derive consumer willingness-to-pay (WTP) estimates. |
+
+---
+
+## 📊 Methods & Statistical Models
+
+### **Experimental Design**
+- Fractional factorial choice design  
+- D-efficiency optimization  
+- Bayesian priors for parameter stability  
+- Blocking & constraint checks  
+
+### **Discrete Choice Modeling**
+- Mixed Logit (RPL/RP Logit) using `gmnl`   
+- WTP estimation via simulated maximum likelihood  
+- Attribute interactions and segmentation insights  
+
+---
+
+## ⚙️ Required R Packages
+
+```r
+library(mlogit)
+library(idefix)
+library(AlgDesign)
+library(tidyverse)
+library(gmnl)   # for Mixed Logit (older version may be required)
